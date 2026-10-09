@@ -202,6 +202,19 @@ Run the fast regression suite without Docker or live model endpoints:
 uv run --project cairn --group dev pytest
 ```
 
+### Package index
+
+Dependencies resolve from PyPI by default. To pull them through a local mirror
+instead, set it in your environment before running `uv`:
+
+```bash
+export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
+```
+
+This re-resolves `cairn/uv.lock` against the mirror, so leave that change out of
+your commits — the committed lockfile is pinned to PyPI so that CI and
+contributors on any network can install it.
+
 ## Disclaimer
 
 Cairn is a general-purpose problem-solving engine. Although it supports penetration testing, CTF solving, security assessment, and vulnerability research workflows, it is intended to be used only in environments where you have explicit authorization to operate.
