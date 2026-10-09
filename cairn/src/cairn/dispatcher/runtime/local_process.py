@@ -14,6 +14,12 @@ LOG = logging.getLogger(__name__)
 READ_CHUNK_SIZE = 65536
 STREAM_JOIN_TIMEOUT_SECONDS = 5.0
 FORCE_KILL_REAP_TIMEOUT_SECONDS = 2.0
+TASKKILL_TIMEOUT_SECONDS = 10.0
+
+IS_WINDOWS = os.name == "nt"
+# SIGKILL is POSIX-only. On Windows the hard kill goes through taskkill /F instead,
+# and this constant is only a label for which branch _signal_group should take.
+KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
 class LocalProcess:
@@ -22,7 +28,11 @@ class LocalProcess:
     Mirrors the container ManagedProcess surface (start/communicate/kill/cancel) but
     executes on the dispatcher host: its own process group so children are killed as a
     group, a Python-enforced timeout instead of the ``timeout`` coreutil, and a
-    SIGTERM -> grace -> SIGKILL shutdown so the CLI can flush its session before dying.
+    graceful-then-forced shutdown so the CLI can flush its session before dying.
+
+    The group handling is platform-specific. POSIX gets its own session via setsid and
+    is signalled with killpg. Windows has neither, so the child is started in a new
+    process group, asked to stop with CTRL_BREAK_EVENT, then torn down with taskkill /T.
     """
 
     def __init__(
@@ -48,6 +58,13 @@ class LocalProcess:
         self._kill_lock = threading.Lock()
 
     def start(self) -> None:
+        # setsid does not exist on Windows; CREATE_NEW_PROCESS_GROUP is the closest
+        # equivalent and is also what makes CTRL_BREAK_EVENT deliverable later.
+        group_kwargs: dict[str, object] = (
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if IS_WINDOWS
+            else {"start_new_session": True}
+        )
         self._process = subprocess.Popen(
             self.command,
             cwd=self._cwd,
@@ -57,7 +74,7 @@ class LocalProcess:
             text=True,
             encoding="utf-8",
             errors="replace",
-            start_new_session=True,
+            **group_kwargs,
         )
         self._stdout_thread = threading.Thread(
             target=self._drain, args=(self._process.stdout, self._stdout_chunks), daemon=True
@@ -107,21 +124,58 @@ class LocalProcess:
             process = self._process
             if process is None or process.poll() is not None:
                 return
-            self._signal_group(process, signal.SIGTERM)
+            self._signal_group(process, hard=False)
             try:
                 process.wait(timeout=self._term_grace)
                 return
             except subprocess.TimeoutExpired:
                 pass
-            self._signal_group(process, signal.SIGKILL)
+            self._signal_group(process, hard=True)
 
     @staticmethod
-    def _signal_group(process: subprocess.Popen[str], sig: int) -> None:
+    def _signal_group(process: subprocess.Popen[str], *, hard: bool) -> None:
+        """Ask the whole worker group to stop (``hard=False``) or force it down.
+
+        Taking the step as a flag rather than a signal number matters on Windows,
+        where there is no SIGKILL to tell the two steps apart.
+        """
+        if IS_WINDOWS:
+            LocalProcess._signal_group_windows(process, hard=hard)
+            return
         try:
-            os.killpg(os.getpgid(process.pid), sig)
+            os.killpg(os.getpgid(process.pid), KILL_SIGNAL if hard else signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             with suppress(ProcessLookupError, PermissionError, ValueError):
-                process.send_signal(sig)
+                process.send_signal(KILL_SIGNAL if hard else signal.SIGTERM)
+
+    @staticmethod
+    def _signal_group_windows(process: subprocess.Popen[str], *, hard: bool) -> None:
+        """Approximate the POSIX group signalling with what Windows offers.
+
+        CTRL_BREAK_EVENT reaches every process in the group created by
+        CREATE_NEW_PROCESS_GROUP, so it stands in for SIGTERM-to-group. For the hard
+        kill, taskkill /T ends the whole child tree; Popen.kill() would end only the
+        direct child and orphan whatever the worker CLI spawned.
+        """
+        if not hard:
+            try:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+                return
+            except (OSError, ValueError):
+                pass  # fall through to the forced kill
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=TASKKILL_TIMEOUT_SECONDS,
+                check=False,
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+        with suppress(OSError, ValueError):
+            process.kill()
 
     @staticmethod
     def _drain(pipe, sink: list[str]) -> None:
