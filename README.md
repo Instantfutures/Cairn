@@ -178,6 +178,22 @@ uv run --project cairn cairn dispatch --config dispatch.yaml
 uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
 ```
 
+### Try it with no API keys (local, zero cost)
+
+Mock workers run as host processes, so the whole engine works without Docker,
+API keys or any LLM calls — useful for seeing the graph grow before wiring up
+real workers:
+
+```bash
+cp dispatch.local.mock.example.yaml dispatch.yaml
+
+uv run --project cairn cairn serve                              # terminal 1
+uv run --project cairn cairn dispatch --config dispatch.yaml    # terminal 2
+```
+
+Open <http://127.0.0.1:8000>, create a project, and watch facts and intents
+appear in the graph. A run converges in well under a minute.
+
 ### Local mode (no Docker)
 
 Instead of one container per project, workers can run directly on the dispatcher host, reusing the machine's already-configured `claude` / `codex` / `pi` CLIs — no Docker, and no API keys in the config.

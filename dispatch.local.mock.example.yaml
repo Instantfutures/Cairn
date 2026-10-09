@@ -1,0 +1,66 @@
+# Zero-cost local demo: mock workers run as host processes. No Docker, no API keys,
+# no LLM calls. Use this to see the engine work before pointing it at real work.
+#
+#   cp dispatch.local.mock.example.yaml dispatch.yaml
+#   uv run --project cairn cairn serve                        # terminal 1
+#   uv run --project cairn cairn dispatch --config dispatch.yaml   # terminal 2
+#
+# Then open http://127.0.0.1:8000 and create a project. The graph fills in ~30s.
+#
+# To switch to real work: set type to claudecode (or codex / pi), set
+# prompt_group to "default", and drop the MOCK_* env block.
+
+server: "http://127.0.0.1:8000"
+
+runtime:
+  execution: local            # host processes, not per-project containers
+  worker_healthcheck: disabled  # mock workers need no endpoint probe
+  interval: 2
+  max_workers: 4
+  max_running_projects: 2
+  max_project_workers: 3
+  healthcheck_timeout: 5
+  prompt_group: "mock"
+
+tasks:
+  bootstrap:
+    timeout: 20
+    conclude_timeout: 10
+  reason:
+    timeout: 20
+    max_intents: 3
+  explore:
+    timeout: 20
+    conclude_timeout: 10
+
+local:
+  # Each project gets an isolated workdir here. Defaults to the current directory.
+  workspace_root: "/tmp/cairn-demo"
+  completed_action: keep
+
+workers:
+  - name: "mock-a"
+    type: "mock"
+    task_types: [bootstrap, reason, explore]
+    max_running: 2
+    priority: 0
+    env:
+      MOCK_HEALTHCHECK: '{"delay":[0,0.1],"outcomes":{"ok":1.0,"fail":0.0}}'
+      MOCK_BOOTSTRAP: '{"delay":[0.2,1],"outcomes":{"complete":0.0,"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0.2,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      # Grow the graph via intents, then complete once 4 facts exist so the run converges.
+      MOCK_REASON: '{"delay":[0.2,1],"outcomes":{"complete":0.0,"intent":0.7,"noop":0.0,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.0},"rules":[{"fact_ids_gte":4,"force":"complete"}]}'
+      # Some failures on purpose, so the error-recovery paths are visible in the log.
+      MOCK_EXPLORE_EXECUTE: '{"delay":[0.5,2],"outcomes":{"fact":0.8,"rejected":0.0,"invalid_json":0.1,"invalid_payload":0.0,"command_fail":0.1}}'
+      MOCK_EXPLORE_CONCLUDE: '{"delay":[0.2,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+
+  - name: "mock-b"
+    type: "mock"
+    task_types: [reason, explore]
+    max_running: 2
+    priority: 1
+    env:
+      MOCK_HEALTHCHECK: '{"delay":[0,0.1],"outcomes":{"ok":1.0,"fail":0.0}}'
+      MOCK_REASON: '{"delay":[0.2,1],"outcomes":{"complete":0.0,"intent":0.7,"noop":0.0,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.0},"rules":[{"fact_ids_gte":4,"force":"complete"}]}'
+      MOCK_EXPLORE_EXECUTE: '{"delay":[0.5,2],"outcomes":{"fact":0.8,"rejected":0.0,"invalid_json":0.1,"invalid_payload":0.0,"command_fail":0.1}}'
+      MOCK_EXPLORE_CONCLUDE: '{"delay":[0.2,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
