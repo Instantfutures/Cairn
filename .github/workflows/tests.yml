@@ -27,8 +27,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned to an exact version on purpose: setup-uv publishes no floating
+      # major tag past v7, so `@v10` does not resolve.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: "cairn/uv.lock"
