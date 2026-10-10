@@ -1,0 +1,35 @@
+# Authorized Security Research Configuration
+# Local execution with custom "security" prompt group
+# This configuration enables authorized penetration testing research
+
+server: "http://127.0.0.1:8000"
+
+runtime:
+  execution: local
+  worker_healthcheck: disabled
+  max_workers: 3
+  max_running_projects: 2
+  max_project_workers: 2
+  interval: 3
+  healthcheck_timeout: 15
+  prompt_group: "security"  # Custom security research prompts
+
+tasks:
+  bootstrap:
+    timeout: 120
+    conclude_timeout: 30
+  reason:
+    timeout: 45
+  explore:
+    timeout: 600
+    conclude_timeout: 120
+
+local:
+  completed_action: keep
+
+workers:
+  - name: "security-researcher"
+    type: "claudecode"
+    task_types: [bootstrap, reason, explore]
+    max_running: 1
+    priority: 0
