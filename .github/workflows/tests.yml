@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to an exact version on purpose: setup-uv publishes no floating
+      # major tag past v7, so `@v10` does not resolve.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "cairn/uv.lock"
+
+      # --locked fails the build if uv.lock is out of sync with pyproject.toml,
+      # so an accidentally re-resolved lockfile cannot land unnoticed.
+      - name: Install dependencies
+        run: uv sync --project cairn --locked --group dev --python ${{ matrix.python-version }}
+
+      # The suite needs no Docker and no live model endpoints.
+      - name: Run tests
+        run: uv run --project cairn --no-sync pytest

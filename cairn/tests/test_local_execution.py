@@ -22,6 +22,12 @@ from conftest import FakeClient, make_config, make_intent, make_project
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# These drive real subprocesses through `sh`, `sleep` and os.kill, none of which
+# exist on Windows. The code under test is cross-platform; only the harness is not.
+requires_posix = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX-only harness: uses sh, sleep and os.kill"
+)
+
 
 # --------------------------------------------------------------------------- LocalProcess
 
@@ -54,6 +60,7 @@ def test_local_process_inherits_cwd(tmp_path: Path) -> None:
     assert Path(result.stdout.strip()).resolve() == tmp_path.resolve()
 
 
+@requires_posix
 def test_local_process_times_out_and_kills_within_grace() -> None:
     process = LocalProcess(
         ["sh", "-c", "sleep 30"],
@@ -71,6 +78,7 @@ def test_local_process_times_out_and_kills_within_grace() -> None:
     assert elapsed < 10  # killed on its own timeout, not the 30s outer backstop
 
 
+@requires_posix
 def test_local_process_kill_terminates_child_process_group(tmp_path: Path) -> None:
     pid_file = tmp_path / "child.pid"
     script = f"sleep 30 & echo $! > {pid_file}; wait"
@@ -97,6 +105,7 @@ def test_local_process_kill_terminates_child_process_group(tmp_path: Path) -> No
         raise AssertionError(f"child process {child_pid} survived the group kill")
 
 
+@requires_posix
 def test_local_process_cancel_records_reason() -> None:
     process = LocalProcess(
         ["sh", "-c", "sleep 30"],
@@ -125,6 +134,7 @@ def test_local_backend_creates_isolated_project_dir(tmp_path: Path) -> None:
     assert backend.container_name("proj_001") == str(tmp_path / "proj_001")
 
 
+@requires_posix
 def test_local_backend_merges_host_env_with_worker_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("CAIRN_HOST_VAR", "host")
     backend = LocalBackend(LocalConfig(workspace_root=str(tmp_path)))
@@ -142,6 +152,7 @@ def test_local_backend_merges_host_env_with_worker_env(tmp_path: Path, monkeypat
     assert result.stdout == "host-worker"
 
 
+@requires_posix
 def test_local_common_env_reaches_worker_subprocess(tmp_path: Path, monkeypatch) -> None:
     # common_env (e.g. an outbound proxy) merges into every worker's env and must survive
     # all the way to the host subprocess in local mode.
@@ -388,6 +399,7 @@ def _install_fake_cli(tmp_path: Path, monkeypatch, name: str, body: str) -> None
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
+@requires_posix
 def test_explore_runs_real_local_cli_end_to_end(tmp_path: Path, monkeypatch) -> None:
     # A fake `claude` on PATH stands in for the real CLI: the whole local path is exercised
     # for real — driver argv -> LocalBackend -> LocalProcess subprocess -> stdout parsing.
@@ -423,6 +435,7 @@ def test_explore_runs_real_local_cli_end_to_end(tmp_path: Path, monkeypatch) -> 
     assert any(p.name == "graph.yaml" for p in snapshot_root.rglob("*"))
 
 
+@requires_posix
 def test_explore_local_cli_rejection_releases_intent(tmp_path: Path, monkeypatch) -> None:
     _install_fake_cli(
         tmp_path,

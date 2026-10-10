@@ -31,6 +31,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[[tool.uv.index]]
-url = "https://mirrors.aliyun.com/pypi/simple"
-default = true
+# No default index is pinned here on purpose: a hardcoded `default = true` index
+# makes `uv sync` fail outright for anyone who cannot reach that host (CI, and
+# contributors outside its region), because a connection error is not treated as
+# "package not found" and does not fall back to PyPI.
+#
+# To resolve through a local mirror instead, set it in your own environment:
+#   export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
+# That re-resolves `uv.lock` against the mirror; keep that churn out of commits.
